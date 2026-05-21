@@ -29,7 +29,7 @@
 - [Tested Environment](#desktop_computer-tested-environment)
 - [Install](#keyboard-install)
 - [Quickstart](#zap-quickstart)
-- [Training and Evaluation (coming soon)](#dart-training-and-evaluation-glue-factory-branch-coming-soon)
+- [Training (experimental reproduction)](#dart-training-experimental-reproduction)
 - [Visualization with hloc (coming soon)](#magic_wand-visualization-and-evaluation-hloc-branch-coming-soon)
 - [FAQ](#question-faq)
 - [To Do](#clipboard-to-do)
@@ -38,12 +38,14 @@
 
 
 ## MambaGlue :snake:
-The `main` branch contains the standard MambaGlue model and inference utilities. Training, evaluation, and SfM/visual-localization workflows will be provided on two dedicated branches, built on top of [CVG Lab](https://cvg.ethz.ch/)'s codebases:
+The `main` branch contains:
 
-- `glue-factory` *(coming soon)*: training and benchmark evaluation, built on [Glue Factory](https://github.com/cvg/glue-factory)
-- `hloc` *(coming soon)*: SfM and visual localization, built on [Hierarchical-Localization](https://github.com/cvg/Hierarchical-Localization/)
+- the standard MambaGlue model and inference utilities (`mambaglue/`); and
+- an experimental training adapter for [Glue Factory](https://github.com/cvg/glue-factory) under `mambaglue/training/` — see [Training](#dart-training-experimental-reproduction).
 
-> **Note:** the `glue-factory` and `hloc` branches are not yet pushed to this repository. Until they are, the `main` branch only supports *inference* with released weights — training is not yet reproducible from this repo on its own. See [`#8`](https://github.com/url-kaist/MambaGlue/issues/8).
+SfM and visual-localization integration is planned for a separate `hloc` branch, built on [Hierarchical-Localization](https://github.com/cvg/Hierarchical-Localization/).
+
+> **Note:** the `hloc` branch is not yet pushed. The training pipeline is functional but has not yet been verified to reproduce the paper's reported numbers end-to-end — defaults are inherited from LightGlue. See [`#8`](https://github.com/url-kaist/MambaGlue/issues/8).
 
 
 ## :desktop_computer: Tested Environment
@@ -98,10 +100,30 @@ points1 = feats1["keypoints"][matches[..., 1]]       # matched keypoints in imag
 Supported front-end extractors: `superpoint`, `disk`, `aliked`, `sift` (passed via the `features=` argument). To visualize matches, see `mambaglue.viz2d`.
 
 
-## :dart: Training and Evaluation (`glue-factory` branch, coming soon)
-> :warning: **The `glue-factory` branch has not been pushed yet.** Tracked in the To-Do below.
+## :dart: Training (experimental reproduction)
 
-When released, the branch will provide a [Glue Factory](https://github.com/cvg/glue-factory) integration to train MambaGlue on any local feature extractor and to benchmark on HPatches and MegaDepth. A single training run takes roughly one week. Configs and exact commands will live on the branch's README. Until then, training is not reproducible from this repo on its own.
+The `mambaglue/training/` subpackage adds a [Glue Factory](https://github.com/cvg/glue-factory) adapter (`MambaGlueMatcher`) and two YAML configs that reproduce the paper's two-stage recipe (synthetic homographies → MegaDepth) without modifying glue-factory itself.
+
+```bash
+# 1) Install glue-factory (not on PyPI)
+pip install "git+https://github.com/cvg/glue-factory.git"
+
+# 2) Install MambaGlue with training extras
+pip install -e ".[train]"
+
+# 3) Run both stages (SuperPoint + MambaGlue)
+bash mambaglue/training/run.sh
+```
+
+The configs are 10-12 GB-tuned (batch 32 for homographies, batch 4 for MegaDepth, `bfloat16` autocast, gradient checkpointing). End-to-end training on a single RTX 3080 takes roughly a week. Target numbers from the paper (SuperPoint + MambaGlue):
+
+| Benchmark                  | Metric                  | Paper            |
+| -------------------------- | ----------------------- | ---------------- |
+| HPatches                   | PR@3px                  | 94.6             |
+| HPatches (LO-RANSAC)       | AUC@1 / 5 px            | 39.0 / 79.3      |
+| MegaDepth-1500 (LO-RANSAC) | AUC@5° / 10° / 20°      | 67.5 / 80.3 / 87.6 |
+
+The paper does not disclose optimizer, learning rate, batch size, layer count, or Mamba SSM dimensions, so defaults are inherited from LightGlue (`lr=1e-4`, AdamW, 9 layers) and from the released MambaGlue checkpoint's architecture. Treat the first run as exploratory. Mamba kernel hyperparameters (`d_state`, `d_conv`, `expand`) are hard-coded in `mambaglue.mambaglue.MambaMixer` — edit the source to sweep them.
 
 
 ## :magic_wand: Visualization and Evaluation (`hloc` branch, coming soon)
@@ -116,7 +138,7 @@ When released, the branch will integrate MambaGlue as a matcher in [Hierarchical
 The weight currently published is a pre-publication version, and the runtime environment used for the paper differs from a fresh install. To match the numbers reported in the paper, train from scratch on your target front-end and tune the inference hyperparameters (e.g. `filter_threshold`, `depth_confidence`, `width_confidence`) on a held-out split.
 
 **Q. How is MambaGlue trained?** ([#8](https://github.com/url-kaist/MambaGlue/issues/8))<br>
-Training is **not** reproducible from this repository at the moment — the `glue-factory` branch where the training pipeline lives has not yet been pushed (tracked in the To-Do below). When it is released, MambaGlue will plug into [Glue Factory](https://github.com/cvg/glue-factory) the same way LightGlue does, with the standard two-stage protocol used by SuperGlue/LightGlue (correspondence head first, then the confidence regressor used for point pruning). Dropping `mambaglue.py` into an upstream Glue Factory checkout is not a valid substitute, since the branch contains additional configs and registration glue that have not been released yet.
+The `mambaglue/training/` subpackage in this branch plugs MambaGlue into [Glue Factory](https://github.com/cvg/glue-factory) with the standard two-stage protocol used by SuperGlue/LightGlue (correspondence head first, then the confidence regressor used for point pruning). See [Training](#dart-training-experimental-reproduction) for setup and the reproduction caveats — the recipe defaults are inherited from LightGlue because the paper does not disclose them.
 
 **Q. Does MambaGlue support point pruning?** ([#5](https://github.com/url-kaist/MambaGlue/issues/5))<br>
 Yes. It is enabled with the `width_confidence` and `depth_confidence` config keys (set to a positive value to activate, `-1` to disable), the same convention as LightGlue. Pruning is auto-skipped on CPU and on small keypoint counts, where the gather overhead outweighs the savings.
@@ -126,7 +148,6 @@ Mamba's selective-scan CUDA kernels do not build on macOS. Use the provided Dock
 
 
 ## :clipboard: To Do
-- [ ] **Push the `glue-factory` branch** (training and benchmark code)
 - [ ] **Push the `hloc` branch** (SfM/visual-localization integration)
 - [ ] Push the published-version checkpoint (currently the released weight is a pre-publication version, see [#6](https://github.com/url-kaist/MambaGlue/issues/6))
 - [ ] Release demo code (notebook)

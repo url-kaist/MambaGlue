@@ -44,9 +44,17 @@ Paper = "https://arxiv.org/abs/2502.00462"
 
 [project.optional-dependencies]
 dev = ["black==23.12.1", "flake8", "isort"]
+# Training reproduction extras. `gluefactory` itself is not installable from
+# PyPI; install it separately (editable from a local clone or directly from
+# https://github.com/cvg/glue-factory). See mambaglue/training/README.md.
+train = ["h5py", "tensorboard", "pytlsd"]
 
 [tool.setuptools]
-packages = ["mambaglue"]
+packages = ["mambaglue", "mambaglue.training"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"mambaglue.training" = ["configs/*.yaml", "run.sh"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
